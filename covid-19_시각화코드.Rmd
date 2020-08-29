@@ -1,0 +1,507 @@
+---
+title: "COVID-19 Tracking"
+author: Inyong_Kim
+date: '2020-05-04'
+output:
+  html_document:
+    toc: true
+---
+
+필요 패키지 : tidyverse, reshape2, gridExtra, ggplot2, plotly
+
+필요 데이터 : covid_19_data.csv, COVID19_line_list_data.csv, time_series_covid_19_confirmed_US.csv
+
+*****************************************
+
+<br>
+
+# Introduction {.tabset .tabset-fade}
+
+SARS-CoV-2 stands for severe acute respiratory syndrome coronavirus 2. As the name suggests, it’s a coronavirus and is related to the coronavirus that causes SARS (Severe Acute Respiratory Syndrome). SARS-CoV-2 is related to coronaviruses in bats, but its intermediate animal host and route to humans are not yet clear. There has been plenty of speculation that the intermediate host could be pangolins, but that is not confirmed... While the identity of SARS-CoV-2’s intermediate host remains unknown, researchers suspect the mystery animal was present in a live animal market in Wuhan, China—the capital city of China’s central Hubei Province and the epicenter of the outbreak [ArsTechnica](https://arstechnica.com/science/2020/03/dont-panic-the-comprehensive-ars-technica-guide-to-the-coronavirus/#h2).
+
+<br>
+Using the data provided here on kaggle, I want to understand the progression of the pandemic, projections of various outcomes, and share some of the tools available in R.  
+---
+<br>
+
+<br>
+```{r}
+knitr::opts_chunk$set(echo = TRUE, message=F, warning = F, error=T)
+```
+
+```{r, echo=FALSE,include=FALSE}
+library(tidyverse)
+library(reshape2)
+library(gridExtra)
+library(ggplot2)
+library(plotly)
+```
+
+
+<br>
+---
+# Reading Data
+
+-- `Country/Region`변수의 'Mainland China'는 'China'로 변경
+
+```{r}
+data <- read_csv("../data/covid_19_data.csv")
+
+list_data <- read_csv("../data/COVID19_line_list_data.csv")
+
+us.data <- read_csv("../data/time_series_covid_19_confirmed_US.csv")
+
+data$`Country/Region` <- gsub('Mainland China','China',data$`Country/Region`)
+```
+
+<br>
+
+# Preprocessing Data
+
+-- 날짜를 ‘월’,’일’,’연도’로 분할
+
+-- 요일 변수 추가
+
+## death Data
+
+```{r}
+death <- select(data, 'Country/Region', ObservationDate, Deaths)
+colnames(death)[colnames(death)=="ObservationDate"] <- "date"
+colnames(death)[colnames(death)=="Deaths"] <- "count"
+
+death <- death %>%
+          group_by(`Country/Region`,date) %>% 
+          summarise_all(list(sum))
+
+datefunction <- function(df) {
+
+df$date <- as.character(df$date)
+
+df <- tidyr::separate(df, date, into=c("month", "day", "year"), sep="/")
+df$month <- as.numeric(df$month)
+df$day <- as.numeric(df$day)
+
+df$year <- ifelse(df$year == '2020', "20", df$year)
+
+df$year <- (as.numeric(df$year) + 2000)
+
+df$date<-as.Date(paste0(df$year,'-',df$month,'-',df$day), format="%Y-%m-%d")
+
+df$weekday <- weekdays(as.Date(df$date))
+
+df$weekday <- ordered(df$weekday, levels=c("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"))
+
+df.date <<- df
+
+return(df.date)
+
+}
+
+datefunction(death)
+
+death <- df.date
+```
+
+<br>
+
+## recovery Data
+
+```{r}
+reco <- subset(data, select = c(`Country/Region`, ObservationDate, Recovered))
+colnames(reco)[colnames(reco)=="ObservationDate"] <- "date"
+colnames(reco)[colnames(reco)=="Recovered"] <- "count"
+
+reco <- reco %>%
+          group_by(`Country/Region`,date) %>% 
+          summarise_all(list(sum))
+
+datefunction(reco)
+
+reco <- df.date
+```
+
+<br>
+
+## confirmed Data
+
+```{r}
+data <- subset(data, select = c(`Country/Region`, ObservationDate, Confirmed))
+colnames(data)[colnames(data)=="ObservationDate"] <- "date"
+colnames(data)[colnames(data)=="Confirmed"] <- "count"
+
+data <- data %>%
+          group_by(`Country/Region`,date) %>% 
+          summarise_all(list(sum))
+
+datefunction(data)
+
+data <- df.date
+```
+---
+<br>
+---
+# Top10 Country
+
+
+## Filtering
+
+-- 가장 최근날짜의 자료를 필터링해서 내림차순으로 정렬후에 상위 10개 추출
+```{r}
+top_10_confirmed <- data %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% head(10)
+
+top_10_reco <- reco %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% head(10)
+
+top_10_death <- death %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% head(10)
+
+top_10_confirmed
+top_10_reco
+top_10_death
+```
+
+<br>
+
+## Making Plots
+
+```{r}
+plot1 <- ggplot(top_10_confirmed, aes(`Country/Region`, count)) +
+  geom_bar(stat='identity', fill='hotpink') +
+  geom_text(aes(label=count), size=2, vjust=1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "", y = "count") +
+  ggtitle("Covid19 확진자 상위10개국 현황") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot2 <- ggplot(top_10_reco, aes(`Country/Region`, count)) +
+  geom_bar(stat='identity', fill='skyblue') +
+  geom_text(aes(label=count), size=2, vjust=1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "", y = "count") +
+  ggtitle("Covid19 완치자 상위10개국 현황") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot3 <- ggplot(top_10_death, aes(`Country/Region`, count)) +
+  geom_bar(stat='identity', fill='green yellow') +
+  geom_text(aes(label=count), size=2, vjust=1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "", y = "count") +
+  ggtitle("Covid19 사망자 상위10개국 현황") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot1,plot2,plot3, ncol = 2)
+```
+---
+<br>
+---
+# Classification by Country
+
+
+## Filtering
+
+-- 주요 국가로 필터링한 후에 mutate 이용해 type 변수 추가해서 확진자, 완치자, 사망자 구분
+
+-- Rbind로 데이터 병합
+
+```{r}
+data_filtered <- data %>% filter(`Country/Region` %in% c('South Korea','China','France','Germany','Iran','Italy','Spain','US'), date=='2020-04-16') %>% mutate(type='confirmed')
+
+reco_filtered <- reco %>% filter(`Country/Region` %in% c('South Korea','China','France','Germany','Iran','Italy','Spain','US'), date=='2020-04-16') %>% mutate(type='recovery')
+
+death_filtered <- death %>% filter(`Country/Region` %in% c('South Korea','China','France','Germany','Iran','Italy','Spain','US'), date=='2020-04-16') %>% mutate(type='death')
+
+bind1 <- rbind(data_filtered, reco_filtered, death_filtered) %>% select(c(count,type))
+
+bind1
+```
+
+<br>
+
+## Making Plots
+
+```{r}
+ggplot(bind1, aes(type, count, fill=type)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label=count, hjust=0)) +
+  facet_wrap(~`Country/Region`) +
+  theme_bw() +
+  labs(x = "", y = "") +
+  ggtitle("Covid19 주요국가별 확진자, 완치자, 사망자 수") +
+  coord_flip() +
+  scale_x_discrete(limits = c("death", "recovery", "confirmed")) +
+  scale_y_continuous(limits=c(0, 1000000)) +
+  theme(axis.text.x=element_blank(), plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+```
+---
+<br>
+
+# Ratio
+
+
+## Filtering
+
+-- count 변수명을 confirmed, recovery, death로 변경 (merge 후에 구분하기 위함)
+
+-- top20의 confirmed, recovery, death 세 개의 데이터를 merge
+
+-- mutate로 ratio 변수 생성
+
+-- 비율은 소수점 넷째자리에서 반올림
+
+```{r}
+top_20_confirmed <- data %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% rename(country=`Country/Region`,confirmed=count) %>% head(20)
+
+top_20_reco <- reco %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% rename(country=`Country/Region`,recovery=count) %>% head(20)
+
+top_20_death <- death %>% group_by(`Country/Region`) %>% filter(date=='2020-04-16') %>% arrange(desc(count)) %>% rename(country=`Country/Region`,death=count) %>% head(20)
+
+a <- merge(top_20_confirmed, top_20_reco)
+b <- merge(a, top_20_death)
+
+ratio <- b %>% select(-c('month','day','year','date','weekday')) %>% mutate(reco_ratio = round(recovery/confirmed,3), death_ratio=round(death/confirmed,3))
+
+ratio
+```
+
+<br>
+
+## Making Plots
+
+```{r}
+plot4 <- ggplot(ratio,aes(country, reco_ratio, fill=country)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label=reco_ratio), size=3, vjust=1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "", y = "완치율") +
+  ggtitle("Covid19 주요국가 완치율 현황") +
+  theme(legend.position = 'none', plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot5 <- ggplot(ratio,aes(country, death_ratio, fill=country)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label=death_ratio), size=3, vjust=1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "", y = "사망률") +
+  ggtitle("Covid19 주요국가 사망률 현황") +
+  theme(legend.position = 'none', plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot4,plot5)
+```
+---
+<br>
+---
+# Cumulative Data by Date
+
+
+## Filtering
+
+-- 전세계 통합 자료를 날짜별로 정렬
+
+-- 주요국가로 필터링 한 후에 날짜별로 정렬
+
+```{r}
+confirmed_date_world <- data %>% group_by(date) %>% summarize(total=sum(count))
+
+confirmed_date_top10 <- data %>% filter(`Country/Region` %in% c('China','France','Germany','Iran','Italy','Spain','Switzerland','Turkey','UK','US')) %>% group_by(date) %>% select(`Country/Region`,count)
+
+confirmed_date_world
+confirmed_date_top10
+```
+```{r}
+reco_date_world <- reco %>% group_by(date) %>% summarize(total=sum(count))
+
+reco_date_top10 <- reco %>% filter(`Country/Region` %in% c('Belgium','China','France','Germany','Iran','Italy','South Korea','Spain','Switzerland','US')) %>% group_by(date) %>% select(`Country/Region`,count)
+
+reco_date_world
+reco_date_top10
+```
+
+```{r}
+death_date_world <- death %>% group_by(date) %>% summarize(total=sum(count))
+
+death_date_top10 <- death %>% filter(`Country/Region` %in% c('Belgium','China','France','Germany','Iran','Italy','Netherlands','Spain','UK','US')) %>% group_by(date) %>% select(`Country/Region`,count)
+
+death_date_world
+death_date_top10
+```
+
+<br>
+
+## Making Plots of Confirmed Case
+
+```{r}
+plot6 <- ggplot(confirmed_date_world, aes(date,total)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Date", y = "확진자") +
+  ggtitle("Covid19 전세계 날짜별 누적 확진자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot7 <- ggplot(confirmed_date_top10, aes(date,count,color=`Country/Region`)) +
+  geom_line(size=1) +
+  theme_bw() +
+  labs(x = "Date", y = "확진자") +
+  ggtitle("Covid19 확진자 상위10개국 날짜별 누적 확진자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot6,plot7)
+```
+---
+<br>
+---
+## Making Plots of Recovery Case
+
+```{r}
+plot8 <- ggplot(reco_date_world, aes(date,total)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Date", y = "완치자") +
+  ggtitle("Covid19 전세계 날짜별 누적 완치자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot9 <- ggplot(reco_date_top10, aes(date,count,color=`Country/Region`)) +
+  geom_line(size=1) +
+  theme_bw() +
+  labs(x = "Date", y = "완치자") +
+  ggtitle("Covid19 완치자 상위10개국 날짜별 누적 완치자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot8,plot9)
+```
+---
+<br>
+---
+## Making Plots of Death Case
+
+```{r}
+plot10 <- ggplot(death_date_world, aes(date,total)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Date", y = "사망자") +
+  ggtitle("Covid19 전세계 날짜별 누적 사망자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot11 <- ggplot(death_date_top10, aes(date,count,color=`Country/Region`)) +
+  geom_line(size=1) +
+  theme_bw() +
+  labs(x = "Date", y = "사망자") +
+  ggtitle("Covid19 사망자 상위10개국 날짜별 누적 사망자 수") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot10,plot11)
+```
+---
+<br>
+---
+# Percentage by Gender & Age Group
+
+
+## Preprocessing Data
+
+-- COVID19_line_list_data를 이용
+
+-- mutate를 이용해 10단위로 나이를 끊어서 연령대 변수를 생성
+
+-- 결측값은 제거
+
+-- 결측값 관측된 데이터가 많아 표본이 적다
+
+-- 연산을 위해 death와 recovered의 변수를 숫자형으로 수정
+
+```{r}
+list_filtered <- list_data%>%select('gender','age','death','recovered')%>% filter(!is.na(gender),!is.na(age))%>%
+  mutate(age_group=ifelse(age<10,'0~9세' ,
+          ifelse(age<20,'10대',
+           ifelse(age<30,'20대',
+            ifelse(age<40,'30대',
+              ifelse(age<50,'40대',
+                ifelse(age<60,'50대',
+                  ifelse(age<70,'60대',
+                    ifelse(age<80,'70대',
+                      ifelse(age<90,'80대',
+                       ifelse(age<100,'90대','100세 이상')))))))))))
+
+list_filtered$death<-as.double(list_filtered$death)
+list_filtered$recovered<-as.double(list_filtered$recovered)
+
+list_filtered_total <- list_filtered%>%group_by(age_group,gender)%>%filter(!is.na(death),!is.na(recovered))%>%summarise(total_death=sum(death),total_recovered=sum(recovered))
+
+list_filtered_total
+```
+
+<br>
+
+## Making Plots
+
+-- mutate를 이용해 percent 변수 생성
+
+-- percent 변수는 소수 셋째 자리에서 반올림
+
+-- ‘check_overlap = T’ 조건을 활용해 글자가 겹치지 않도록 배치
+
+```{r}
+plot12 <- ggplot(list_filtered %>% group_by(gender,age_group) %>% summarize(total=n()) %>% mutate(percent=round(total/sum(total),2)),aes(gender,percent,fill=age_group)) +
+  geom_bar(stat='identity',position='fill') +
+  coord_flip() +
+  theme_bw() +
+  geom_text(aes(label=percent),position = position_stack(vjust=0.5), size=3, check_overlap = T, color ='white') +
+  labs(x = "성별", y = "퍼센트") +
+  ggtitle("Covid19 확진자 성별 분류") +
+  theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+plot13 <- ggplot(list_filtered %>% group_by(age_group,gender) %>% summarize(total=n()) %>% mutate(percent=round(total/sum(total),2)),aes(age_group,percent,fill=gender)) + geom_bar(stat='identity',position='fill') +
+  theme_bw() +
+  geom_text(aes(label=percent),position = position_stack(vjust=0.5), size=4, check_overlap = T, color ='white') +
+ labs(x = "연령대", y = "퍼센트") +
+ ggtitle("Covid19 확진자 연령대 분류") +
+ theme(plot.title=element_text(family="NanumGothic", face="bold", size=10, vjust=2, hjust=0.5))
+
+
+grid.arrange(plot12,plot13)
+```
+---
+<br>
+---
+# Mapbox Density in US by Plotly
+
+## Making Mapbox Density
+
+-- Lat과 Long_ 값이 0인 로우 제거
+
+```{r}
+us.data2<-us.data%>%filter(!'Lat'==0)
+
+fig <- us.data2 
+fig <- fig %>%
+  plot_ly(
+    type = 'densitymapbox',
+    lat = ~Lat,
+    lon = ~Long_,
+    coloraxis = 'coloraxis',
+    radius = 10) 
+fig <- fig %>%
+  layout(
+    mapbox = list(
+      style="stamen-terrain",
+      center= list(lon=180)), coloraxis = list(colorscale = "Viridis"))
+
+fig
+```
+---
+
+<br>
+
