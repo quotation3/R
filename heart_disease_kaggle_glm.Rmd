@@ -1,0 +1,295 @@
+---
+title: "201400699_김인용"
+author: "kim inyong"
+date: '2020 12 24 '
+output: html_document
+---
+
+# 심장병 Dataset
+
+https://www.kaggle.com/ronitf/heart-disease-uci
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(rpart)
+library(partykit)
+library(gridExtra)
+library(riskr)
+library(h2o)
+```
+### EDA
+
+```{r}
+heart <- read.csv("./heart.csv")
+head(heart)
+```
+
+age : 나이
+<br>
+sex : 성별
+<br>
+cp : 가슴 통증 유형
+<br>
+trestbps : 혈압
+<br>
+chol : 콜레스테롤
+<br>
+fbs : 혈당 (1=true, 0=false)
+<br>
+restecg : 심전도
+<br>
+thalach : 최대 심박수
+<br>
+exang : 협심증 유발 운동 (1=yes, 0=no)
+<br>
+oldpeak : 비교적 안정되기까지 운동으로 유발되는 ST depression
+<br>
+slope : 최대 운동 ST segment의 기울기
+<br>
+ca : 형광 투시된 주요 혈관의 수 (0-3)
+<br>
+thal : (3=보통, 6=해결된 결함, 7=해결가능한 결함)
+<br>
+target : 심장병 여부 (1=true, 0=false)
+
+```{r}
+# 결측치 확인
+heart[is.na(heart)]
+```
+
+```{r}
+# 데이터 구조 확인
+str(heart)
+```
+
+```{r}
+# 데이터 요약
+summary(heart)
+```
+```{r}
+heart2 <- heart %>% 
+  mutate(sex = if_else(sex == 1, "male", "female"),
+         fbs = if_else(fbs == 1, ">120", "<=120"),
+         exang = if_else(exang == 1, "yes" ,"no"),
+         cp = if_else(cp == 1, "atypical angina",
+                      if_else(cp == 2, "non-anginal pain", "nothing")),
+         restecg = if_else(restecg == 0, "normal",
+                           if_else(restecg == 1, "abnormal", "definite")),
+         slope = as.factor(slope),
+         ca = as.factor(ca),
+         thal = as.factor(thal),
+         target = if_else(target == 1, "yes", "no")
+         ) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  dplyr::select(target, sex, fbs, exang, cp, restecg, slope, ca, thal, everything())
+```
+
+```{r}
+cor_heart <- cor(heart2[,10:14])
+cor_heart
+
+library(corrplot)
+corrplot(cor_heart, method = "number", type="upper",)
+```
+
+```{r}
+ggplot(heart2, aes(x=heart2$target, fill=heart2$target)) + 
+  geom_bar() +
+  xlab("Heart Disease") +
+  ylab("Count") +
+  ggtitle("Analysis of Presence and Absence of Heart Disease") +
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence"))
+```
+
+```{r}
+heart2 %>% 
+  group_by(age) %>% 
+  count() %>% 
+  filter(n > 10) %>% 
+  ggplot()+
+  geom_col(aes(age, n))+
+  ggtitle("Age Analysis") +
+  xlab("Age")  +
+  ylab("AgeCount")
+```
+
+```{r}
+heart2 %>%
+  ggplot(aes(x=age,fill=sex))+
+  geom_histogram()+
+  xlab("Age") + 
+  ylab("Number")+
+  guides(fill = guide_legend(title = "Gender"))
+```
+
+```{r}
+heart2 %>%
+  ggplot(aes(x=age,y=chol,color=sex, size=chol))+
+  geom_point(alpha=0.7)+xlab("Age") +
+  ylab("Cholestoral")+
+  guides(fill = guide_legend(title = "Gender"))
+```
+
+```{r}
+library(gridExtra)
+
+grid.arrange(
+  ggplot(heart2, aes(x = sex, fill = target))+
+  geom_bar(position = "fill"),
+  
+  ggplot(heart2, aes(x = fbs, fill = target))+
+  geom_bar(position = "fill"),
+  
+  ggplot(heart2, aes(x = exang, fill = target))+
+  geom_bar(position = "fill"), nrow = 3
+  )
+```
+
+```{r}
+grid.arrange(
+  ggplot(heart2, aes(x = cp, fill = target))+
+  geom_bar(position = "fill")+ theme(axis.text.x = element_text(angle = 90, hjust = 1)),
+  
+  ggplot(heart2, aes(x = restecg, fill = target))+
+  geom_bar(position = "fill")+ theme(axis.text.x = element_text(angle = 90, hjust = 1)), ncol = 2
+)
+```
+
+```{r}
+grid.arrange(
+  ggplot(heart2, aes(x = slope, fill = target))+
+  geom_bar(position = "fill"),
+  
+  ggplot(heart2, aes(x = ca, fill = target))+
+  geom_bar(position = "fill"),
+  
+  ggplot(heart2, aes(x = thal, fill = target))+
+  geom_bar(position = "fill")
+)
+```
+
+### h2o 방식
+
+```{r}
+# train data, test data 분류
+train_idx <- sample(nrow(heart2) , 0.7*nrow(heart2), replace = F)
+train <- heart2[train_idx,]
+test <- heart2[-train_idx,]
+```
+
+```{r}
+# h2o 적용
+h2o.no_progress()
+h2o.init(nthreads = -1  )
+train.hex <- as.h2o(train , destination_frame =  "train.hex")
+test.hex <- as.h2o(test , destination_frame =  "test.hex")
+```
+
+```{r}
+# train data 요약
+summary(train.hex)
+```
+
+```{r}
+# train data 구조 확인
+str(train.hex)
+```
+
+```{r}
+# 독립변수, 종속변수 설정
+Y <- "target"
+X <- setdiff( names(train.hex) , Y)
+```
+
+```{r}
+# 로지스틱 회귀분석 모델링
+logit_model <- h2o.glm(x = X,y = Y , 
+                              training_frame = train.hex, family = "binomial")
+
+h2o.performance(logit_model, test.hex)
+```
+
+```{r}
+# 파라미터 조정을 통해 최적값 찾기
+alphas <- seq(0, 1, 0.05)
+
+logit.grid <- h2o.grid(
+  algorithm = "glm",
+  hyper_params = list(alpha = alphas),
+  x = X, y = Y,
+  grid_id = "logit_grid1",
+  training_frame = train.hex,
+  stopping_metric = "logloss",
+  stopping_tolerance = 0.0001,
+  family = "binomial",
+  standardize = TRUE , 
+  nfolds = 10 ,
+  max_runtime_secs = 20
+)
+
+logit_gridperf <- h2o.getGrid(grid_id = "logit_grid1",
+                             sort_by = "logloss",
+                             decreasing = FALSE)
+
+best_logit <- h2o.getModel(logit_gridperf@model_ids[[1]])
+```
+
+```{r}
+# coefficients 확인
+best_logit@model$coefficients_table 
+```
+
+```{r}
+# 파라미터 확인
+best_logit@parameters
+```
+
+```{r}
+# 모델 요약
+best_logit@model$model_summary
+```
+
+### 대체 방식
+
+```{r}
+# train data, test data 분류
+library(caTools)
+set.seed(99)
+split = sample.split(heart2$target, SplitRatio = 0.7)
+train = subset(heart2, split==TRUE)
+test = subset(heart2, split==FALSE)
+```
+
+```{r}
+# 로지스틱 회귀분석
+logreg = glm(target~age+sex+cp+trestbps+chol+fbs+restecg+thalach+exang+oldpeak+slope+ca+thal,data=train, family='binomial')
+```
+
+```{r}
+# 결과 요약
+summary(logreg)
+```
+
+```{r}
+# 예측
+predictTest = predict(logreg,newdata=test, type='response')
+```
+
+```{r}
+# 정확도 0.5 이상인 것만 확인
+table(test$target, predictTest>0.5)
+```
+
+```{r}
+# AUC 구하기
+library(ROCR)
+ROCRpred = prediction(predictTest, test$target)
+auc = as.numeric(performance(ROCRpred, 'auc')@y.values)
+auc
+```
+
+```{r}
+ROCRperf = performance(ROCRpred, 'tpr','fpr')
+plot(ROCRperf, colorize=TRUE, main='ROCR Curve')
+```
